@@ -1,14 +1,15 @@
-var exec = require('cordova/exec');
+var exec = require("cordova/exec");
 
 var Photos = {
-
 	collections: function (options, successCallback, errorCallback) {
 		if (typeof options === "function") {
 			errorCallback = successCallback;
 			successCallback = options;
 			options = null;
 		}
-		exec(successCallback, errorCallback, "Photos", "collections", [options]);
+		exec(successCallback, errorCallback, "Photos", "collections", [
+			options
+		]);
 	},
 
 	photos: function (collectionIds, options, successCallback, errorCallback) {
@@ -22,9 +23,9 @@ var Photos = {
 			case "string":
 				collectionIds = [collectionIds];
 				if (typeof options == "function") {
-						errorCallback = successCallback;
-						successCallback = options;
-						options = null;
+					errorCallback = successCallback;
+					successCallback = options;
+					options = null;
 				}
 				break;
 			case "object":
@@ -36,7 +37,41 @@ var Photos = {
 				}
 				break;
 		}
-		exec(successCallback, errorCallback, "Photos", "photos", [collectionIds, options]);
+		exec(successCallback, errorCallback, "Photos", "photos", [
+			collectionIds,
+			options
+		]);
+	},
+
+	videos: function (collectionIds, options, successCallback, errorCallback) {
+		switch (typeof collectionIds) {
+			case "function":
+				errorCallback = options;
+				successCallback = collectionIds;
+				options = null;
+				collectionIds = null;
+				break;
+			case "string":
+				collectionIds = [collectionIds];
+				if (typeof options == "function") {
+					errorCallback = successCallback;
+					successCallback = options;
+					options = null;
+				}
+				break;
+			case "object":
+				if (collectionIds.constructor !== Array) {
+					errorCallback = successCallback;
+					successCallback = options;
+					options = collectionIds;
+					collectionIds = null;
+				}
+				break;
+		}
+		exec(successCallback, errorCallback, "Photos", "videos", [
+			collectionIds,
+			options
+		]);
 	},
 
 	thumbnail: function (photoId, options, successCallback, errorCallback) {
@@ -45,7 +80,10 @@ var Photos = {
 			successCallback = options;
 			options = null;
 		}
-		exec(successCallback, errorCallback, "Photos", "thumbnail", [photoId, options]);
+		exec(successCallback, errorCallback, "Photos", "thumbnail", [
+			photoId,
+			options
+		]);
 	},
 
 	image: function (photoId, successCallback, errorCallback) {
@@ -57,12 +95,27 @@ var Photos = {
 	},
 
 	getPhotoLibraryAuthorization: function (successCallback, errorCallback) {
-		exec(successCallback, errorCallback, "Photos", "getPhotoLibraryAuthorization", []);
+		exec(
+			successCallback,
+			errorCallback,
+			"Photos",
+			"getPhotoLibraryAuthorization",
+			[]
+		);
 	},
 
-	requestPhotoLibraryAuthorization: function (successCallback, errorCallback) {
-		exec(successCallback, errorCallback, "Photos", "requestPhotoLibraryAuthorization", []);
-	},
+	requestPhotoLibraryAuthorization: function (
+		successCallback,
+		errorCallback
+	) {
+		exec(
+			successCallback,
+			errorCallback,
+			"Photos",
+			"requestPhotoLibraryAuthorization",
+			[]
+		);
+	}
 };
 
 module.exports = Photos;
