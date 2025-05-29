@@ -271,22 +271,36 @@ NSString* const S_SORT_TYPE = @"creationDate";
             options.networkAccessAllowed = YES;
             options.version = PHVideoRequestOptionsVersionOriginal;
             
-            [[PHImageManager defaultManager] requestAVAssetForVideo:asset options:options resultHandler:^(AVAsset* _Nullable asset, AVAudioMix* _Nullable audioMix, NSDictionary* _Nullable info) {
+            [[PHImageManager defaultManager] requestAVAssetForVideo:asset options:options resultHandler:^(AVAsset* _Nullable avAsset, AVAudioMix* _Nullable audioMix, NSDictionary* _Nullable info) {
                 if (![weakSelf isNull:info[PHImageErrorKey]]) {
-                    [weakSelf failure:command withMessage:info[PHImageErrorKey]];
+                    [weakSelf failure:command withMessage:((NSError *)info[PHImageErrorKey]).localizedDescription];
                     return;
                 }
                 
-                if ([weakSelf isNull:asset]) {
+                if ([weakSelf isNull:avAsset]) {
                     [weakSelf failure:command withMessage:@"Could not load video asset"];
                     return;
                 }
                 
-                AVAssetImageGenerator* generator = [[AVAssetImageGenerator alloc] initWithAsset:asset];
+                CGFloat videoWidth = asset.pixelWidth;
+                CGFloat videoHeight = asset.pixelHeight;
+                CGFloat targetWidth = size;
+                CGFloat targetHeight = size;
+
+                if (videoWidth > 0 && videoHeight > 0) {
+                    CGFloat aspectRatio = videoWidth / videoHeight;
+                    if (videoWidth > videoHeight) {
+                        targetHeight = size / aspectRatio;
+                    } else {
+                        targetWidth = size * aspectRatio;
+                    }
+                }
+
+                AVAssetImageGenerator* generator = [[AVAssetImageGenerator alloc] initWithAsset:avAsset];
                 generator.appliesPreferredTrackTransform = YES;
-                generator.maximumSize = CGSizeMake(size, size);
+                generator.maximumSize = CGSizeMake(targetWidth, targetHeight);
                 
-                CMTime time = CMTimeMake(0, 1); // Get first frame
+                CMTime time = CMTimeMake(0, 1);
                 NSError* error = nil;
                 CGImageRef cgImage = [generator copyCGImageAtTime:time actualTime:nil error:&error];
                 
@@ -303,8 +317,8 @@ NSString* const S_SORT_TYPE = @"creationDate";
                 UIImage* image = [UIImage imageWithCGImage:cgImage];
                 CGImageRelease(cgImage);
                 
-                UIGraphicsBeginImageContext(CGSizeMake(size, size));
-                [image drawInRect:CGRectMake(0, 0, size, size)];
+                UIGraphicsBeginImageContext(CGSizeMake(targetWidth, targetHeight));
+                [image drawInRect:CGRectMake(0, 0, targetWidth, targetHeight)];
                 UIImage* thumbnail = UIGraphicsGetImageFromCurrentImageContext();
                 UIGraphicsEndImageContext();
                 
