@@ -90,6 +90,10 @@ var Photos = {
 		exec(successCallback, errorCallback, "Photos", "image", [photoId]);
 	},
 
+	video: function (videoId, successCallback, errorCallback) {
+		exec(successCallback, errorCallback, "Photos", "video", [videoId]);
+	},
+
 	cancel: function () {
 		exec(null, null, "Photos", "cancel", []);
 	},

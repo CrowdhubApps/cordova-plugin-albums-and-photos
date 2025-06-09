@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <plugin xmlns="http://www.phonegap.com/ns/plugins/1.0"
-        xmlns:android="http://schemas.android.com/apk/res/android"
-        id="cordova-plugin-albums-and-photos"
-        version="1.0.0">
+	xmlns:android="http://schemas.android.com/apk/res/android" id="cordova-plugin-albums-and-photos" version="1.1.0">
 
 	<name>Photos</name>
 	<keywords>cordova, camera, file, exif, geo, location, geolocation, tag</keywords>
@@ -37,9 +35,22 @@
 				<param name="ios-package" value="CDVPhotos"/>
 			</feature>
 		</config-file>
-		<header-file src="src/ios/CDVPhotos.h"/>
-		<source-file src="src/ios/CDVPhotos.m"/>
-		<framework src="Photos.framework"/>
+		<!-- <header-file src="src/ios/CDVPhotos.h"/>
+		<source-file src="src/ios/CDVPhotos.m"/> -->
+		<source-file src="src/ios/CDVPhotos.swift" framework="Photos"/>
+		<!-- <framework src="Photos.framework"/> -->
+		<js-module src="www/photos.js" name="Photos">
+			<clobbers target="Photos"/>
+		</js-module>
+		<method name="collections"/>
+		<method name="photos"/>
+		<method name="videos"/>
+		<method name="thumbnail"/>
+		<method name="image"/>
+		<method name="video"/>
+		<method name="cancel"/>
+		<method name="getPhotoLibraryAuthorization"/>
+		<method name="requestPhotoLibraryAuthorization"/>
 	</platform>
 
 </plugin>

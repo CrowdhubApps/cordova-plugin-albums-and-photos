@@ -19,6 +19,7 @@ NSString* const P_LON = @"longitude";
 NSString* const P_DATE = @"date";
 NSString* const P_TS = @"timestamp";
 NSString* const P_TYPE = @"contentType";
+NSString* const P_URI = @"uri";
 NSString* const P_COUNT = @"count";
 
 NSString* const P_SIZE = @"dimension";
@@ -405,6 +406,87 @@ NSString* const S_SORT_TYPE = @"creationDate";
     return newImage;
 }
 
+- (void) video:(CDVInvokedUrlCommand*)command {
+    CDVPhotos* __weak weakSelf = self;
+    [self checkPermissionsOf:command andRun:^{
+        PHAsset* asset = [weakSelf assetByCommand:command];
+        if (asset == nil) return;
+
+        if (asset.mediaType != PHAssetMediaTypeVideo) {
+            [weakSelf failure:command withMessage:@"Asset is not a video"];
+            return;
+        }
+
+        PHVideoRequestOptions* options = [[PHVideoRequestOptions alloc] init];
+        options.networkAccessAllowed = YES;
+        options.version = PHVideoRequestOptionsVersionOriginal; // Get original video
+
+        [[PHImageManager defaultManager] requestExportSessionForVideo:asset 
+                                                              options:options 
+                                                         exportPreset:AVAssetExportPresetHighestQuality 
+                                                        resultHandler:^(AVAssetExportSession * _Nullable exportSession, NSDictionary * _Nullable info) {
+            if (![weakSelf isNull:info[PHImageErrorKey]]) {
+                [weakSelf failure:command withMessage:((NSError *)info[PHImageErrorKey]).localizedDescription];
+                return;
+            }
+
+            if (exportSession == nil) {
+                [weakSelf failure:command withMessage:@"Could not create export session for video asset"];
+                return;
+            }
+
+            NSString* outputFilePath = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.mov", asset.localIdentifier]];
+            NSURL* outputURL = [NSURL fileURLWithPath:outputFilePath];
+
+            // Remove existing file if any
+            NSFileManager* fileManager = [NSFileManager defaultManager];
+            if ([fileManager fileExistsAtPath:outputFilePath]) {
+                NSError* error = nil;
+                [fileManager removeItemAtPath:outputFilePath error:&error];
+                if (error) {
+                    [weakSelf failure:command withMessage:[NSString stringWithFormat:@"Could not remove existing temp file: %@", error.localizedDescription]];
+                    return;
+                }
+            }
+            
+            exportSession.outputURL = outputURL;
+            // Try to determine a suitable output file type. MOV is generally safe.
+            // For more specific types, you might inspect avAsset.tracks or rely on the preset.
+            // If the exportPreset sets a compatible type, this might not be strictly necessary
+            // but it's good for clarity or if a specific format is required.
+            if ([exportSession.supportedFileTypes containsObject:AVFileTypeQuickTimeMovie]) {
+                exportSession.outputFileType = AVFileTypeQuickTimeMovie;
+            } else if (exportSession.supportedFileTypes.count > 0) {
+                exportSession.outputFileType = exportSession.supportedFileTypes[0]; // Fallback to the first supported type
+            } else {
+                [weakSelf failure:command withMessage:@"No supported output file types for export session"];
+                return;
+            }
+
+            [exportSession exportAsynchronouslyWithCompletionHandler:^{
+                if (exportSession.status == AVAssetExportSessionStatusCompleted) {
+                    NSData* videoData = [NSData dataWithContentsOfURL:outputURL];
+                    if ([weakSelf isNull:videoData]) {
+                        [weakSelf failure:command withMessage:@"Failed to read exported video data"];
+                    } else {
+                        [weakSelf success:command withData:videoData];
+                    }
+                    // Clean up temporary file
+                    [fileManager removeItemAtURL:outputURL error:nil];
+                } else if (exportSession.status == AVAssetExportSessionStatusFailed) {
+                    NSString* errorMessage = @"Video export failed";
+                    if (exportSession.error) {
+                        errorMessage = [NSString stringWithFormat:@"Video export failed: %@", exportSession.error.localizedDescription];
+                    }
+                    [weakSelf failure:command withMessage:errorMessage];
+                } else {
+                    [weakSelf failure:command withMessage:[NSString stringWithFormat:@"Video export completed with unexpected status: %ld", (long)exportSession.status]];
+                }
+            }];
+        }];
+    }];
+}
+
 - (void) cancel:(CDVInvokedUrlCommand*)command {
     self.photosCommand = nil;
     [self success:command];
@@ -633,6 +715,11 @@ NSString* const S_SORT_TYPE = @"creationDate";
                             [assetItem setValue:@(coord.latitude) forKey:P_LAT];
                             [assetItem setValue:@(coord.longitude) forKey:P_LON];
                         }
+                        // Add URI for the video asset
+                        NSString* assetIdPathless = [asset.localIdentifier componentsSeparatedByString:@"/"][0];
+                        NSString* uriString = [NSString stringWithFormat:@"assets-library://asset/asset.%@?id=%@&ext=%@", ext, assetIdPathless, ext];
+                        [assetItem setValue:uriString forKey:P_URI];
+                        
                         [result addObject:assetItem];
                         if (limit > 0 && result.count >= limit) {
                             *stop = YES;
@@ -724,6 +811,11 @@ NSString* const S_SORT_TYPE = @"creationDate";
                             [assetItem setValue:@(coord.latitude) forKey:P_LAT];
                             [assetItem setValue:@(coord.longitude) forKey:P_LON];
                         }
+                        // Add URI for the video asset
+                        NSString* assetIdPathless = [asset.localIdentifier componentsSeparatedByString:@"/"][0];
+                        NSString* uriString = [NSString stringWithFormat:@"assets-library://asset/asset.%@?id=%@&ext=%@", ext, assetIdPathless, ext];
+                        [assetItem setValue:uriString forKey:P_URI];
+                        
                         [result addObject:assetItem];
                         if (limit > 0 && result.count >= limit) {
                             *stop = YES;
@@ -823,6 +915,11 @@ NSString* const S_SORT_TYPE = @"creationDate";
                                       [assetItem setValue:@(coord.latitude) forKey:P_LAT];
                                       [assetItem setValue:@(coord.longitude) forKey:P_LON];
                                   }
+                                  // Add URI for the video asset
+                                  NSString* assetIdPathless = [asset.localIdentifier componentsSeparatedByString:@"/"][0];
+                                  NSString* uriString = [NSString stringWithFormat:@"assets-library://asset/asset.%@?id=%@&ext=%@", ext, assetIdPathless, ext];
+                                  [assetItem setValue:uriString forKey:P_URI];
+
                                   [result addObject:assetItem];
                                   if (limit > 0 && result.count >= limit) {
                                       *stop = YES;
@@ -920,6 +1017,11 @@ NSString* const S_SORT_TYPE = @"creationDate";
                                       [assetItem setValue:@(coord.latitude) forKey:P_LAT];
                                       [assetItem setValue:@(coord.longitude) forKey:P_LON];
                                   }
+                                  // Add URI for the video asset
+                                  NSString* assetIdPathless = [asset.localIdentifier componentsSeparatedByString:@"/"][0];
+                                  NSString* uriString = [NSString stringWithFormat:@"assets-library://asset/asset.%@?id=%@&ext=%@", ext, assetIdPathless, ext];
+                                  [assetItem setValue:uriString forKey:P_URI];
+
                                   [result addObject:assetItem];
                                   if (limit > 0 && result.count >= limit) {
                                       *stop = YES;

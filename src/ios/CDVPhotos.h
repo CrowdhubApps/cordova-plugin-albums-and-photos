@@ -10,6 +10,7 @@
 - (void) videos:(CDVInvokedUrlCommand*)command;
 - (void) thumbnail:(CDVInvokedUrlCommand*)command;
 - (void) image:(CDVInvokedUrlCommand*)command;
+- (void) video:(CDVInvokedUrlCommand*)command;
 - (void) cancel:(CDVInvokedUrlCommand*)command;
 // RIGHT
 - (void) getPhotoLibraryAuthorization:(CDVInvokedUrlCommand*)command;
