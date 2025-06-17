@@ -30,6 +30,9 @@ private enum Constants {
     static let pListOffset = "offset"
     static let pListLimit = "limit"
     static let pListInterval = "interval"
+    static let pSearchText = "searchText"
+    static let pStartDate = "startDate"
+    static let pEndDate = "endDate"
 
     static let tDataUrl = "data:image/jpeg;base64,%@"
     static let tDateFormat = "YYYY-MM-dd'T'HH:mm:ssZZZZZ"
@@ -332,48 +335,77 @@ class CDVPhotos: CDVPlugin {
         self.photosCommand = command
         
         checkPermissions(of: command) { [weak self] in
-            guard let self = self else {
-                // If self is nil, the command might be orphaned.
-                // Consider if a failure message should be sent even if photosCommand was set.
-                // For now, if self is nil, photosCommand won't be cleared, which might be an issue.
-                // However, the original Obj-C also has this potential issue if weakSelf is nil before clearing.
-                return
-            }
+            guard let self = self else { return }
             
             let collectionIds: [String]? = self.arg(of: command, at: 0, default: nil)
-            // NSLog(@"photos: collectionIds=%@", collectionIds);
-            print("photos: collectionIds=\(collectionIds ?? [])")
+            let options: [String: Any] = self.arg(of: command, at: 1, default: [:] as [String: Any])
+            
+            // Extract search parameters
+            let searchText: String? = self.valueFrom(dictionary: options, byKey: Constants.pSearchText, default: nil)
+            let startDateStr: String? = self.valueFrom(dictionary: options, byKey: Constants.pStartDate, default: nil)
+            let endDateStr: String? = self.valueFrom(dictionary: options, byKey: Constants.pEndDate, default: nil)
+            
+            // Convert date strings to Date objects if provided
+            var startDate: Date?
+            var endDate: Date?
+            
+            if let startDateStr = startDateStr {
+                startDate = self.dateFormat.date(from: startDateStr)
+            }
+            if let endDateStr = endDateStr {
+                endDate = self.dateFormat.date(from: endDateStr)
+            }
+            
+            // Create search predicate
+            var predicates: [NSPredicate] = [NSPredicate(format: "mediaType = %d", PHAssetMediaType.image.rawValue)]
+            
+            // Add search text predicate if provided
+            if let searchText = searchText, !searchText.isEmpty {
+                predicates.append(NSPredicate(format: "((mediaSubtype & %d) != 0) OR ((mediaSubtype & %d) != 0)", 
+                    PHAssetMediaSubtype.photoPanorama.rawValue,
+                    PHAssetMediaSubtype.photoHDR.rawValue))
+                
+                // Add search text to metadata
+                let searchPredicate = NSPredicate(format: "ANY keywords CONTAINS[cd] %@", searchText)
+                predicates.append(searchPredicate)
+            }
+            
+            // Add date range predicate if provided
+            if let startDate = startDate {
+                predicates.append(NSPredicate(format: "creationDate >= %@", startDate as NSDate))
+            }
+            if let endDate = endDate {
+                predicates.append(NSPredicate(format: "creationDate <= %@", endDate as NSDate))
+            }
+            
+            // Combine all predicates
+            let finalPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
             
             var result: [[String: Any]]? = nil
             
             if collectionIds == nil || collectionIds!.isEmpty {
-                result = self.fetchAllMedia(ofType: .image, command: command)
+                result = self.fetchAllMedia(ofType: .image, command: command, predicate: finalPredicate)
             } else {
                 let fetchResultAssetCollections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: collectionIds!, options: nil)
                 
                 if fetchResultAssetCollections.count == 0 && !collectionIds!.isEmpty {
-                     // This case might indicate wrong collection IDs were provided.
-                     // Original code doesn't explicitly check fetchResultAssetCollections for nil or empty before proceeding
-                     // but relies on fetchImagesFromCollections to handle it (which might return empty).
-                     // For clarity, we could add a specific failure here if needed, or let it return empty as before.
                     print("Warning: No collections found for given IDs: \(collectionIds!)")
                 }
-                result = self.fetchMediaFromCollections(ofType: .image, fetchResultAssetCollections: fetchResultAssetCollections, command: command)
+                result = self.fetchMediaFromCollections(ofType: .image, fetchResultAssetCollections: fetchResultAssetCollections, command: command, predicate: finalPredicate)
             }
             
             self.photosCommand = nil
             if let res = result {
                 self.success(command: command, array: res)
             } else {
-                // This case should ideally be handled by sub-methods sending a failure
                 self.failure(command: command, message: "Failed to fetch photos.")
             }
         }
     }
 
-    // Generic media fetching function to be used by photos and videos
-    private func fetchAllMedia(ofType mediaType: PHAssetMediaType, command: CDVInvokedUrlCommand) -> [[String: Any]]? {
-        guard let currentCommand = self.photosCommand else { return nil } // Ensure command context is valid
+    // Update fetchAllMedia to accept predicate
+    private func fetchAllMedia(ofType mediaType: PHAssetMediaType, command: CDVInvokedUrlCommand, predicate: NSPredicate? = nil) -> [[String: Any]]? {
+        guard let currentCommand = self.photosCommand else { return nil }
         
         let options: [String: Any] = self.arg(of: currentCommand, at: 1, default: [:] as [String: Any])
         let offset = valueFrom(dictionary: options, byKey: Constants.pListOffset, default: "0").toInt() ?? 0
@@ -383,9 +415,15 @@ class CDVPhotos: CDVPlugin {
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: Constants.sSortType, ascending: false)]
         fetchOptions.includeAllBurstAssets = true
         fetchOptions.includeHiddenAssets = true
-        fetchOptions.predicate = NSPredicate(format: "mediaType = %d", mediaType.rawValue)
         
-        if offset == 0 && limit > 0 { // Original logic: fetchLimit is only applied if offset is 0.
+        // Apply the search predicate if provided
+        if let predicate = predicate {
+            fetchOptions.predicate = predicate
+        } else {
+            fetchOptions.predicate = NSPredicate(format: "mediaType = %d", mediaType.rawValue)
+        }
+        
+        if offset == 0 && limit > 0 {
             fetchOptions.fetchLimit = limit
         }
         
@@ -463,8 +501,9 @@ class CDVPhotos: CDVPlugin {
         return result
     }
 
-    private func fetchMediaFromCollections(ofType mediaType: PHAssetMediaType, fetchResultAssetCollections: PHFetchResult<PHAssetCollection>, command: CDVInvokedUrlCommand) -> [[String: Any]]? {
-        guard let currentCommand = self.photosCommand else { return nil } // Ensure command context is valid
+    // Update fetchMediaFromCollections to accept predicate
+    private func fetchMediaFromCollections(ofType mediaType: PHAssetMediaType, fetchResultAssetCollections: PHFetchResult<PHAssetCollection>, command: CDVInvokedUrlCommand, predicate: NSPredicate? = nil) -> [[String: Any]]? {
+        guard let currentCommand = self.photosCommand else { return nil }
 
         let options: [String: Any] = self.arg(of: currentCommand, at: 1, default: [:] as [String: Any])
         let offset = valueFrom(dictionary: options, byKey: Constants.pListOffset, default: "0").toInt() ?? 0
@@ -476,24 +515,24 @@ class CDVPhotos: CDVPlugin {
 
         fetchResultAssetCollections.enumerateObjects { [weak self] (assetCollection, _, stopCollections) in 
             guard let self = self else { return }
-            if self.photosCommand == nil { // Check if the command was cancelled
+            if self.photosCommand == nil {
                 stopCollections.pointee = true
                 return
             }
 
             let fetchOptions = PHFetchOptions()
             fetchOptions.sortDescriptors = [NSSortDescriptor(key: Constants.sSortType, ascending: false)]
-            // Original ObjC applies fetchLimit here only if offset is 0. This might be different from fetchAllMedia.
-            // For consistency and based on typical pagination, limit should apply to the number of items *returned*,
-            // and offset to items *skipped*.
-            // Let's adjust for clarity: fetch all that match, then apply offset/limit post-fetch or during enumeration.
-            // The original code's fetchLimit in fetchAssetsInAssetCollection when offset is 0 is a bit tricky.
-            // It means if offset=0, limit=10, it fetches at most 10. If offset=5, limit=10, it fetches all then skips.
-            // Let's try to replicate: if offset == 0 and limit > 0, apply fetchLimit.
-            if offset == 0 && limit > 0 {
-                 fetchOptions.fetchLimit = limit // This limits items *per collection* if applied here.
+            
+            // Apply the search predicate if provided
+            if let predicate = predicate {
+                fetchOptions.predicate = predicate
+            } else {
+                fetchOptions.predicate = NSPredicate(format: "mediaType = %d", mediaType.rawValue)
             }
-            fetchOptions.predicate = NSPredicate(format: "mediaType = %d", mediaType.rawValue)
+            
+            if offset == 0 && limit > 0 {
+                fetchOptions.fetchLimit = limit
+            }
 
             let fetchResultAssets = PHAsset.fetchAssets(in: assetCollection, options: fetchOptions)
             

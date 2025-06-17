@@ -26,6 +26,11 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 
 /**
  * Useful links:
@@ -136,6 +141,24 @@ public class Photos extends CordovaPlugin {
 						@Override
 						public void run() {
 							image(data.optJSONObject(0), callbackContext);
+						}
+					});
+				break;
+			case "videos":
+				if (checkPermission(action, data, callbackContext))
+					cordova.getThreadPool().execute(new Runnable() {
+						@Override
+						public void run() {
+							videos(data.optJSONArray(0), data.optJSONObject(1), callbackContext);
+						}
+					});
+				break;
+			case "video":
+				if (checkPermission(action, data, callbackContext))
+					cordova.getThreadPool().execute(new Runnable() {
+						@Override
+						public void run() {
+							video(data.optJSONObject(0), callbackContext);
 						}
 					});
 				break;
@@ -419,6 +442,138 @@ public class Photos extends CordovaPlugin {
 			rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, DEF_QUALITY, osImage);
 
 			callbackContext.success(osImage.toByteArray());
+		} catch (Exception e) {
+			Log.e(TAG, e.getMessage(), e);
+			callbackContext.error(e.getMessage());
+		}
+	}
+
+	private void videos(final JSONArray collectionIds, final JSONObject options, final CallbackContext callbackContext) {
+		if (getPhotosCallbackContext() != null) {
+			callbackContext.error(E_PHOTO_BUSY);
+			return;
+		}
+		setPhotosCallbackContext(callbackContext);
+
+		final String selection;
+		final String[] selectionArgs;
+		if (collectionIds != null && collectionIds.length() > 0) {
+			selection = BUCKET_ID + " IN (" + repeatText(collectionIds.length(), "?", ",") + ")";
+			selectionArgs = this.<String>jsonArrayToList(collectionIds).toArray(new String[collectionIds.length()]);
+		} else {
+			selection = null;
+			selectionArgs = null;
+		}
+
+		final int offset = options != null ? options.optInt(P_LIST_OFFSET, 0) : 0;
+		final int limit = options != null ? options.optInt(P_LIST_LIMIT, 0) : 0;
+		final int interval = options != null ? options.optInt(P_LIST_INTERVAL, 30) : 30;
+
+		try (final Cursor cursor = query(
+				cordova.getActivity().getContentResolver(),
+				MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+				new String[]{MediaStore.Video.Media._ID, MediaStore.Video.Media.TITLE, 
+					MediaStore.Video.Media.DATE_TAKEN, MediaStore.Video.Media.LATITUDE, 
+					MediaStore.Video.Media.LONGITUDE, MediaStore.Video.Media.WIDTH, 
+					MediaStore.Video.Media.HEIGHT, MediaStore.Video.Media.DURATION},
+				selection,
+				selectionArgs,
+				MediaStore.Video.Media.DATE_TAKEN + " DESC")) {
+			int fetched = 0;
+			JSONArray result = new JSONArray();
+			if (cursor.moveToFirst()) {
+				do {
+					if (getPhotosCallbackContext() == null) break;
+					if (offset <= fetched) {
+						final JSONObject item = new JSONObject();
+						item.put(P_ID, cursor.getString(cursor.getColumnIndex(MediaStore.Video.Media._ID)));
+						item.put(P_NAME, cursor.getString(cursor.getColumnIndex(MediaStore.Video.Media.TITLE)));
+						item.put(P_TYPE, "video/mp4");
+						long ts = cursor.getLong(cursor.getColumnIndex(MediaStore.Video.Media.DATE_TAKEN));
+						if (ts != 0) {
+							item.put(P_TS, ts);
+							item.put(P_DATE, DF.format(new Date(ts)));
+						}
+						
+						item.put(P_WIDTH, cursor.getInt(cursor.getColumnIndex(MediaStore.Video.Media.WIDTH)));
+						item.put(P_HEIGHT, cursor.getInt(cursor.getColumnIndex(MediaStore.Video.Media.HEIGHT)));
+						
+						double latitude = cursor.getDouble(cursor.getColumnIndex(MediaStore.Video.Media.LATITUDE));
+						double longitude = cursor.getDouble(cursor.getColumnIndex(MediaStore.Video.Media.LONGITUDE));
+						if (latitude != 0 || longitude != 0) {
+							item.put(P_LAT, latitude);
+							item.put(P_LON, longitude);
+						}
+
+						// Add duration in milliseconds
+						long duration = cursor.getLong(cursor.getColumnIndex(MediaStore.Video.Media.DURATION));
+						item.put("duration", duration);
+
+						result.put(item);
+						if (limit > 0 && result.length() >= limit) {
+							PluginResult pr = new PluginResult(PluginResult.Status.OK, result);
+							pr.setKeepCallback(true);
+							callbackContext.sendPluginResult(pr);
+							result = new JSONArray();
+							Thread.sleep(interval < 0 ? 30 : interval);
+						}
+					}
+					++fetched;
+				} while (cursor.moveToNext());
+			}
+			setPhotosCallbackContext(null);
+			callbackContext.success(result);
+		} catch (Exception e) {
+			Log.e(TAG, e.getMessage(), e);
+			setPhotosCallbackContext(null);
+			callbackContext.error(e.getMessage());
+		}
+	}
+
+	private void video(final JSONObject video, final CallbackContext callbackContext) {
+		String videoId = video != null ? video.optString(P_ID, null) : null;
+
+		try {
+			if (videoId == null || videoId.isEmpty() || "null".equalsIgnoreCase(videoId))
+				throw new IllegalArgumentException(E_PHOTO_ID_UNDEF);
+
+			Uri videoUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, videoId);
+			ContentResolver resolver = cordova.getActivity().getContentResolver();
+
+			// Get video file path
+			String[] projection = {MediaStore.Video.Media.DATA};
+			Cursor cursor = resolver.query(videoUri, projection, null, null, null);
+			if (cursor == null || !cursor.moveToFirst()) {
+				throw new IllegalStateException(E_PHOTO_ID_WRONG);
+			}
+
+			String videoPath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA));
+			cursor.close();
+
+			// Create a temporary file to store the video
+			File tempFile = File.createTempFile("video_", ".mp4", cordova.getActivity().getCacheDir());
+			FileInputStream inStream = new FileInputStream(videoPath);
+			FileOutputStream outStream = new FileOutputStream(tempFile);
+
+			// Copy video data
+			byte[] buffer = new byte[1024];
+			int length;
+			while ((length = inStream.read(buffer)) > 0) {
+				outStream.write(buffer, 0, length);
+			}
+
+			inStream.close();
+			outStream.close();
+
+			// Send the video file path back to JavaScript
+			JSONObject result = new JSONObject();
+			result.put("type", "download_complete");
+			result.put("uri", "file://" + tempFile.getAbsolutePath());
+			callbackContext.success(result);
+
+			// Clean up the temporary file after a delay
+			tempFile.deleteOnExit();
+
 		} catch (Exception e) {
 			Log.e(TAG, e.getMessage(), e);
 			callbackContext.error(e.getMessage());
