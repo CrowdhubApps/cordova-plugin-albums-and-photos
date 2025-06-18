@@ -1,6 +1,6 @@
 # Cordova Photos Plugin
 
-This Cordova/Phonegap plugin provides access to photo library on device.
+This Cordova/Phonegap plugin provides access to photo and video library on device.
 
 Only iOS and Android are supported for now - please feel free to make your pull requests for new platforms.
 
@@ -19,15 +19,23 @@ Please note that this plugin deals with _photo images only - not videos or any o
         1. [Arguments](#arguments-1)
         2. [Callbacks](#callbacks-1)
         3. [Examples](#examples-1)
-    4. [Generate a thumbnail of given photo - `thumbnail()`][thumbnail]
+    4. [Get video assets - `videos()`][videos]
+        1. [Arguments](#arguments-4)
+        2. [Callbacks](#callbacks-4)
+        3. [Examples](#examples-5)
+    5. [Generate a thumbnail of given photo - `thumbnail()`][thumbnail]
         1. [Arguments](#arguments-2)
         2. [Callbacks](#callbacks-2)
         3. [Examples](#examples-2)
-    5. [Get original data of photo - `image()`][image]
+    6. [Get original data of photo - `image()`][image]
         1. [Arguments](#arguments-3)
         2. [Callbacks](#callbacks-3)
         3. [Examples](#examples-3)
-    6. [Stop long fetching process - `cancel()`][cancel]
+    7. [Get video data - `video()`][video]
+        1. [Arguments](#arguments-5)
+        2. [Callbacks](#callbacks-5)
+        3. [Examples](#examples-6)
+    8. [Stop long fetching process - `cancel()`][cancel]
         1. [Examples](#examples-4)
 2. [More Info](#more-info)
 
@@ -200,6 +208,83 @@ The `failure` callback function takes a string argument with error description.
     		}
     	},
     	console.error
+    );
+    ```
+
+### Get video assets - `videos()`
+
+This function requests the list of video assets that are available in specified collections.
+
+#### Arguments
+
+1. An optional `collectionIds` argument takes an array of collection IDs that are obtained
+   with [`collections()`][collections] method. You may specify only one ID as a string argument.
+   <br>If you omit `collectionIds` argument then only assets from device's Camera Roll are returned.
+2. An optional `options` argument that supports the following keys and according values:
+
+    | Key        | Type | Default | Action                                                                                                       |
+    | :--------- | :--: | :-----: | :----------------------------------------------------------------------------------------------------------- |
+    | `offset`   | int  |   `0`   | Amount of first N videos that should be skipped during fetch. Less than `0` means `0`.                       |
+    | `limit`    | int  |   `0`   | Maximal number of videos that should be returned to client at once during fetch. `0` or less means no limit. |
+    | `interval` | int  |  `30`   | A time interval delay in millis between bundle fetches. Less than `0` means default.                         |
+
+**Please be warned** that _`limit` option doesn't stop fetching process_ - it just limits the amount
+of fetched video records that are aggregated in plugin for client -
+so that if you use `limit` option then you may get several `success` callback calls,
+where each of them brings next aggregated bundle of fetched videos.
+
+If you want to stop fetching, you have to explicitly call [`cancel()`][cancel] function,
+that will break the running fetch process.
+
+#### Callbacks
+
+The resulting structure of argument that comes into `success` callback function is
+array of objects with the following structure:
+
+| Property      |  Type  | Descritpion                                                                                              |
+| :------------ | :----: | :------------------------------------------------------------------------------------------------------- |
+| `id`          | string | An unique video identifier that you may use in [`video()`][video] method.                                |
+| `name`        | string | A file name of video (without path and extension).                                                       |
+| `timestamp`   |  long  | A video's timestamp in millis from Jan 1, 1970                                                           |
+| `date`        | string | A video's timestamp in [ISO 8601][1] format in `YYYY-MM-dd'T'HH:mm:ssZZZ` pattern.                       |
+| `contentType` | string | Content type of video: e.g. `"video/mp4"` or `"video/quicktime"`.                                        |
+| `width`       |  int   | A width of video in pixels.                                                                              |
+| `height`      |  int   | A height of video in pixels.                                                                             |
+| `duration`    |  long  | Duration of video in milliseconds.                                                                       |
+| `latitude`    | double | An optional geolocation latitude.                                                                        |
+| `longitude`   | double | An optional geolocation longitude.                                                                       |
+
+The `failure` callback function takes a string argument with error description.
+
+#### Examples
+
+1. Get all videos from the device's Camera Roll:
+
+    ```js
+    Photos.videos(
+        function (videos) {
+            console.log(videos);
+        },
+        function (error) {
+            console.error("Error: " + error);
+        }
+    );
+    ```
+
+2. Get videos from specific collections with pagination:
+
+    ```js
+    Photos.videos(
+        ["XXXXXX", "YYYYYY"],
+        { offset: 100, limit: 10 },
+        function (videos) {
+            console.log(videos);
+            // If you want to stop fetching more videos
+            Photos.cancel();
+        },
+        function (error) {
+            console.error("Error: " + error);
+        }
     );
     ```
 
@@ -479,6 +564,74 @@ The `failure` callback function takes a string argument with error description.
     });
     ```
 
+### Get video data - `video()`
+
+This function requests the video data for a specified video ID. The video is copied to a temporary location and the path is returned.
+
+#### Arguments
+
+A required `videoId` argument that is a video ID you obtained by [`videos()`][videos] function.
+
+#### Callbacks
+
+The resulting data of argument that comes into `success` callback function is an object with the following structure:
+
+| Property    |  Type  | Description                                                                                              |
+| :---------- | :----: | :------------------------------------------------------------------------------------------------------- |
+| `type`      | string | Either "download_progress" during download or "download_complete" when finished                          |
+| `progress`  | number | Download progress between 0 and 1 (only present when type is "download_progress")                        |
+| `uri`       | string | File URI to the video (only present when type is "download_complete")                                    |
+
+The `failure` callback function takes a string argument with error description.
+
+#### Examples
+
+1. Get video data and play it in a video element:
+
+    ```js
+    Photos.video(
+        "XXXXXX",
+        function (result) {
+            if (result.type === "download_progress") {
+                console.log("Download progress: " + (result.progress * 100) + "%");
+            } else if (result.type === "download_complete") {
+                var video = document.createElement("video");
+                video.src = result.uri;
+                video.controls = true;
+                document.body.appendChild(video);
+            }
+        },
+        function (error) {
+            console.error("Error: " + error);
+        }
+    );
+    ```
+
+2. Get video data and save it to a file (requires [cordova-plugin-file][5]):
+
+    ```js
+    Photos.video(
+        "XXXXXX",
+        function (result) {
+            if (result.type === "download_complete") {
+                window.resolveLocalFileSystemURL(
+                    result.uri,
+                    function (fileEntry) {
+                        // Now you can use fileEntry to access the video file
+                        console.log("Video saved at: " + fileEntry.fullPath);
+                    },
+                    function (error) {
+                        console.error("Error accessing video file: " + error);
+                    }
+                );
+            }
+        },
+        function (error) {
+            console.error("Error: " + error);
+        }
+    );
+    ```
+
 ### Stop long fetching process - `cancel()`
 
 This is no-argument function that simply breaks any long fetching process that runs in the background.
@@ -503,6 +656,8 @@ Maintained now by Jeremy Guyet
 [thumbnail]: #generate-a-thumbnail-of-given-photo---thumbnail
 [image]: #get-original-data-of-photo---image
 [cancel]: #stop-long-fetching-process---cancel
+[videos]: #get-video-assets---videos
+[video]: #get-video-data---video
 [1]: https://www.w3.org/TR/NOTE-datetime
 [2]: https://en.wikipedia.org/wiki/Data_URI_scheme
 [3]: https://www.html5rocks.com/en/tutorials/webgl/typed_arrays/
